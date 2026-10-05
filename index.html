@@ -50,10 +50,21 @@
       background-color: #000000;
     }
 
+    /* Tap for sound transparent full-screen interaction layer */
+    .sound-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+      padding-bottom: max(32px, env(safe-area-inset-bottom, 32px));
+      background: transparent;
+      cursor: pointer;
+    }
+
     /* Subtle Unmute Prompt Pill */
     .unmute-pill {
-      position: absolute;
-      bottom: max(32px, env(safe-area-inset-bottom, 32px));
       background: rgba(0, 0, 0, 0.55);
       border: 1px solid rgba(255, 255, 255, 0.2);
       backdrop-filter: blur(12px);
@@ -65,7 +76,6 @@
       font-weight: 500;
       letter-spacing: 0.3px;
       cursor: pointer;
-      z-index: 10;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -147,12 +157,14 @@
       <source src="vedio.mp4" type="video/mp4" />
     </video>
 
-    <!-- Tap to unmute button if browser started muted -->
-    <div id="unmutePill" class="unmute-pill" style="display: none;">
-      <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
-      </svg>
-      Tap for sound
+    <!-- Tap for sound full-screen interaction overlay -->
+    <div id="soundOverlay" class="sound-overlay">
+      <div id="unmutePill" class="unmute-pill">
+        <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+        </svg>
+        Tap for sound
+      </div>
     </div>
   </div>
 
@@ -169,11 +181,12 @@
   <script>
     (function () {
       const video = document.getElementById('privateVideo');
-      const unmutePill = document.getElementById('unmutePill');
+      const soundOverlay = document.getElementById('soundOverlay');
       const fallbackOverlay = document.getElementById('fallbackOverlay');
       const endScreen = document.getElementById('endScreen');
+      let isUnmuting = false;
 
-      // 1. Disable context menu & drag events
+      // 1. Disable context menu & drag/scroll events
       document.addEventListener('contextmenu', (e) => e.preventDefault());
       document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
 
@@ -193,8 +206,8 @@
         if (playPromise !== undefined) {
           playPromise
             .then(() => {
-              // Autoplay succeeded muted. Show unmute option.
-              unmutePill.style.display = 'flex';
+              // Autoplay succeeded muted. Show sound interaction layer.
+              soundOverlay.style.display = 'flex';
             })
             .catch(() => {
               // Autoplay blocked by browser policy. Show tap-to-play overlay.
@@ -203,32 +216,57 @@
         }
       }
 
-      // Unmute handler on user interaction
+      // Unmute handler executed within user gesture
       function enableSound() {
+        if (!video.muted || isUnmuting) return;
+        isUnmuting = true;
+
+        const currentTime = video.currentTime;
         video.muted = false;
-        unmutePill.style.display = 'none';
+        if (!isNaN(currentTime) && currentTime > 0) {
+          video.currentTime = currentTime;
+        }
+
+        const playPromise = video.play();
+
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              soundOverlay.style.display = 'none';
+              isUnmuting = false;
+            })
+            .catch((err) => {
+              console.warn('Play failed after unmute:', err);
+              // Fallback if unmuting failed
+              video.muted = true;
+              video.play().catch(() => {});
+              isUnmuting = false;
+            });
+        } else {
+          soundOverlay.style.display = 'none';
+          isUnmuting = false;
+        }
       }
 
-      unmutePill.addEventListener('click', (e) => {
+      // Tap on interaction layer unmutes and resumes playback
+      soundOverlay.addEventListener('click', (e) => {
         e.stopPropagation();
         enableSound();
       });
 
-      // Tap to play overlay handler if autoplay was blocked
+      // Tap to play overlay handler if autoplay was completely blocked
       fallbackOverlay.addEventListener('click', () => {
         fallbackOverlay.style.display = 'none';
+        soundOverlay.style.display = 'none';
+        const currentTime = video.currentTime;
         video.muted = false;
+        if (!isNaN(currentTime) && currentTime > 0) {
+          video.currentTime = currentTime;
+        }
         video.play().catch(() => {
           video.muted = true;
           video.play();
         });
-      });
-
-      // Also unmute if user taps anywhere on screen while unmute pill is visible
-      document.body.addEventListener('click', () => {
-        if (video.muted && !video.paused) {
-          enableSound();
-        }
       });
 
       // 4. Handle Video Completion (End Event)
