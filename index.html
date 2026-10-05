@@ -184,7 +184,7 @@
       const soundOverlay = document.getElementById('soundOverlay');
       const fallbackOverlay = document.getElementById('fallbackOverlay');
       const endScreen = document.getElementById('endScreen');
-      let isUnmuting = false;
+      let soundEnabled = false;
 
       // 1. Disable context menu & drag/scroll events
       document.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -216,57 +216,46 @@
         }
       }
 
-      // Unmute handler executed within user gesture
-      function enableSound() {
-        if (!video.muted || isUnmuting) return;
-        isUnmuting = true;
+      // Sound activation handler executed directly within user gesture
+      async function enableSound() {
+        if (soundEnabled) return;
 
-        const currentTime = video.currentTime;
+        const wasPlaying = !video.paused && !video.ended;
+        const position = video.currentTime;
+
         video.muted = false;
-        if (!isNaN(currentTime) && currentTime > 0) {
-          video.currentTime = currentTime;
-        }
+        video.volume = 1;
 
-        const playPromise = video.play();
+        try {
+          await video.play();
 
-        if (playPromise !== undefined) {
-          playPromise
-            .then(() => {
-              soundOverlay.style.display = 'none';
-              isUnmuting = false;
-            })
-            .catch((err) => {
-              console.warn('Play failed after unmute:', err);
-              // Fallback if unmuting failed
-              video.muted = true;
-              video.play().catch(() => {});
-              isUnmuting = false;
-            });
-        } else {
+          // Only restore position if Chrome changed it unexpectedly.
+          if (Math.abs(video.currentTime - position) > 0.25) {
+            video.currentTime = position;
+            await video.play();
+          }
+
+          soundEnabled = true;
           soundOverlay.style.display = 'none';
-          isUnmuting = false;
+        } catch (error) {
+          console.log('Sound playback was blocked:', error);
+
+          // Keep the overlay visible so the user can try again.
+          video.muted = true;
         }
       }
 
-      // Tap on interaction layer unmutes and resumes playback
+      // Tap on interaction layer unmutes and resumes playback directly from user gesture
       soundOverlay.addEventListener('click', (e) => {
         e.stopPropagation();
         enableSound();
       });
 
       // Tap to play overlay handler if autoplay was completely blocked
-      fallbackOverlay.addEventListener('click', () => {
+      fallbackOverlay.addEventListener('click', (e) => {
+        e.stopPropagation();
         fallbackOverlay.style.display = 'none';
-        soundOverlay.style.display = 'none';
-        const currentTime = video.currentTime;
-        video.muted = false;
-        if (!isNaN(currentTime) && currentTime > 0) {
-          video.currentTime = currentTime;
-        }
-        video.play().catch(() => {
-          video.muted = true;
-          video.play();
-        });
+        enableSound();
       });
 
       // 4. Handle Video Completion (End Event)
